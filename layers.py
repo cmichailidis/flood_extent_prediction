@@ -13,7 +13,7 @@ class ConvBlock2D(tf.keras.layers.Layer):
       architecture
     
     - Residual connections are used to achieve better gradient flow during training 
-      This idea was popularized by the authors of the ResNET50 architecture
+      This idea was popularized by the authors of the ResNET architecture
     """
 
     def __init__(
@@ -79,7 +79,8 @@ class ConvBlock2D(tf.keras.layers.Layer):
         The 'inputs' tensor first goes through the 1x1 Conv-BatchNorm-ReLU block. 
         The output of this computation is then fed to the hidden Conv-BatchNorm-ReLU blocks.
         With the exception of the first 1x1 conv block, residual connections are used to between
-        the input and output of every hidden conv block. 
+        the input and output of every hidden conv block. The final Conv-BatchNorm-ReLU block 
+        may apply a Dropout layer with a small dropout probability.
 
         Arguments List: 
         -> inputs: (4D tensor) {batch, height, width, channels}
@@ -194,7 +195,7 @@ class ConvBlockLSTM(tf.keras.layers.Layer):
 
         Arguments List: 
         -> inputs:  (5D tensor) { batch, timestep, height, width, channels }
-        -> training: (bool) 
+        -> training: (bool) True during training mode, False during inference mode.  
 
         Returns: 
         -> output: (5D tensor) { batch, timestep, height, width, channels }
@@ -213,7 +214,7 @@ class ConvBlockLSTM(tf.keras.layers.Layer):
             output = self._batch_norm_layers[i](temp, training = training)
             output = self._conv_lstm_layers[i](output, training = training)
 
-            # All ConvLSTM layers use a Residual connection with the exception of the first one.
+            # All ConvLSTM layers use a Residual connection between their input and output ( with the exception of the first layer )
             if i > 0: 
                 output = self._residual_layers[i]([output, temp])
 
