@@ -5,8 +5,6 @@ def BinaryJaccardIndex(
     y_pred, 
     epsilon = 1e-5, 
     axis = -1, 
-    use_cloud_mask = True, 
-    cloud_threshold = 0.5,
     num_of_prediction_steps = 1):
     
     """
@@ -21,15 +19,11 @@ def BinaryJaccardIndex(
     IoU values close to 0, indicate poor overlap between A and B
 
     Arguments List:
-    -> y_true: (5D tensor) Ground-truth segmentation mask + optional cloud-probability masks { batch x timesteps x height x width x 2 }
+    -> y_true: (5D tensor) Ground-truth segmentation mask + cloud mask { batch x timesteps x height x width x 2 }
     -> y_pred: (5D tensor) Predicted segmentation mask { batch x timesteps x height x width x 1 } 
     -> epsilon: (float) small positive constant for numeric stability in tensor division operations
     -> axis: (int)
-    -> use_cloud_mask: (bool) if True, all pixels with a cloud-probability greater than 'cloud_threshold' are not taken into account
-       The default is True
-    -> cloud_threshold: (float) See above
-    -> num_of_prediction_steps: (int) Number of future prediction steps to take into account when calculating this metric. The default
-       is 1 which means that only the next prediction step is taken into account.
+    -> num_of_prediction_steps: (int) Number of prediction steps to take into account when calculating the loss function
 
     Returns:
     -> IoU: scalar, 1D tensor
@@ -38,8 +32,9 @@ def BinaryJaccardIndex(
     -> https://github.com/keras-team/keras-contrib/blob/master/keras_contrib/losses/jaccard.py
     """
 
-    # Separate cloud-probabilities and ground-truth masks
-    cloud_prob, y_mask = y_true[:,:,:,:,0], y_true[:,:,:,:,1]
+    # Separate cloud-probabilities and ground-truth masks and drop un-necessary dimensions
+    cloud_prob, y_mask = y_true[:,:num_of_prediction_steps,:,:,0], y_true[:,:num_of_prediction_steps,:,:,1]
+    y_pred = y_pred[:,:num_of_prediction_steps,:,:,0]
     
     # Flatten tensors down to 1 dimension
     y_mask = tf.keras.backend.flatten(y_mask)
@@ -47,21 +42,25 @@ def BinaryJaccardIndex(
 
     # Intersection (Overlap between ground-truth and predictions)
     intersection = tf.keras.backend.abs(y_mask * y_pred)
-    intersection = tf.keras.backend.sum(intersection, axis=axis)
 
     # Union (Required for scaling / normalization step)
-    union = tf.keras.backend.abs(y_mask) + tf.keras.backend.abs(y_pred)
-    union = tf.keras.backend.sum(union, axis=axis)
-    union = union - intersection
+    union = tf.keras.backend.abs(y_mask) + tf.keras.backend.abs(y_pred) - intersection
 
-    return  intersection / (union + epsilon)
+    # Cloud mask
+    intersection = intersection * cloud_mask
+    union = union * cloud_mask
+
+    # Estimate total size of intersection and union sets 
+    union = tf.keras.backend.sum(union, axis=axis)
+    intersection = tf.keras.backend.sum(intersection, axis=axis)
+
+    return  ( intersection + epsilon ) / (union + epsilon)
 
 def BinaryDiceCoefficient(
     y_true, 
     y_pred, 
     epsilon = 1e-5, 
     axis = -1, 
-    use_cloud_mask = False, 
     num_of_prediction_steps = 1):
     
     """
@@ -81,14 +80,15 @@ def BinaryDiceCoefficient(
     -> y_pred: (tensor)
     -> epsilon: (float)
     -> axis: (int)
-    -> use_cloud_mask: (bool)
+    -> num_of_prediction_steps: (int) Number of prediction steps to take into account when calculating the loss function
 
     Returns:
     -> coeff: scalar 1D tensor
     """
 
-    # Separate cloud-probabilities and ground-truth masks
-    cloud_prob, y_mask = y_true[:,:,:,:,0], y_true[:,:,:,:,1]
+    # Separate cloud-probabilities and ground-truth masks and drop un-necessary dimensions
+    cloud_prob, y_mask = y_true[:,:num_of_prediction_steps,:,:,0], y_true[:,:num_of_prediction_steps,:,:,1]
+    y_pred = y_pred[:,:num_of_prediction_steps,:,:,0]
     
     # Flatten tensors down to 1 dimension
     y_mask = tf.keras.backend.flatten(y_mask)
@@ -96,12 +96,45 @@ def BinaryDiceCoefficient(
 
     # "Fuzzy" Intersection (Overlap between ground-truth and predictions)
     intersection = tf.keras.backend.abs(y_mask * y_pred)
-    intersection = tf.keras.backend.sum(intersection, axis = axis)
 
     # "Fuzzy" Union (Required for scaling / normalization step)
-    union = tf.keras.backend.abs(y_mask) + tf.keras.backend.abs(y_pred)
+    union = tf.keras.backend.abs(y_mask) + tf.keras.backend.abs(y_pred) - intersection
+
+    # Cloud mask
+    intersection = intersection * cloud_mask
+    union = union * cloud_mask
+
+    # Estimate total size of intersection and union sets
     union = tf.keras.backend.sum(union, axis = axis)
-    union = union - intersection
+    intersection = tf.keras.backend.sum(intersection, axis = axis)
 
     # Dice Coefficient 
-    return ( 2 * intersection ) / ( union + intersection + epsilon )
+    return ( 2 * intersection + epsilon ) / ( union + intersection + epsilon )
+
+def binary_iou_func(smoothing = 1e-5, num_of_prediction_steps = 1): 
+    """
+    Description:
+
+    Arguments List: 
+    -> smoothing: (float) 
+    -> num_of_prediction_steps: (int)
+
+    Returns: 
+    A function handle (lambda function) for calculating the binary IoU segmentation metric 
+    """
+    
+    return lambda y_true, y_pred : BinaryJaccardIndex(y_true, y_pred, smoothing = smoothing, num_of_prediction_steps = num_of_prediction_steps)
+
+def binary_dice_func(smoothing = 1e-5, num_of_prediction_steps = 1):
+    """
+    Description:
+
+    Arguments List: 
+    -> smoothing: (float) 
+    -> num_of_prediction_steps: (int)
+
+    Returns: 
+    A function handle (lambda function) for calculating the binary Dice coefficient segmentation metric
+    """
+    
+    return lambda y_true, y_pred : BinaryDiceCoefficient(y_true, y_pred, smoothing = smoothing, num_of_prediction_steps = num_of_prediction_steps)
